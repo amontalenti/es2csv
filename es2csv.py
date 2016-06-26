@@ -15,7 +15,7 @@ import os
 import sys
 import time
 import argparse
-import json
+import ujson as json
 import csv
 import elasticsearch
 import progressbar
@@ -66,8 +66,7 @@ class Es2csv:
         self.scroll_size = 100
         self.scroll_time = '30m'
 
-        self.csv_headers = list(META_FIELDS) if self.opts.meta_fields else []
-        self.tmp_file = '%s.tmp' % opts.output_file
+        self.tmp_file = '%s' % opts.output_file
 
     @retry(elasticsearch.exceptions.ConnectionError, tries=TIMES_TO_TRY)
     def create_connection(self):
@@ -130,7 +129,6 @@ class Es2csv:
             print(res)
 
         if self.num_results > 0:
-            open(self.opts.output_file, 'w').close()
             open(self.tmp_file, 'w').close()
 
             hit_list = []
@@ -167,50 +165,16 @@ class Es2csv:
             bar.finish()
 
     def flush_to_file(self, hit_list):
-        def to_keyvalue_pairs(source, ancestors=[], header_delimeter='.'):
-            def is_list(arg):
-                return type(arg) is list
-
-            def is_dict(arg):
-                return type(arg) is dict
-
-            if is_dict(source):
-                for key in source.keys():
-                    to_keyvalue_pairs(source[key], ancestors + [key])
-
-            elif is_list(source):
-                if self.opts.kibana_nested:
-                    [to_keyvalue_pairs(item, ancestors) for item in source]
-                else:
-                    [to_keyvalue_pairs(item, ancestors + [str(index)]) for index, item in enumerate(source)]
-            else:
-                header = header_delimeter.join(ancestors)
-                if header not in self.csv_headers:
-                    self.csv_headers.append(header)
-                try:
-                    out[header] = '%s%s%s' % (out[header], self.opts.delimiter, source)
-                except:
-                    out[header] = source
-
         with open(self.tmp_file, 'a') as tmp_file:
             for hit in hit_list:
-                out = {field: hit[field] for field in META_FIELDS} if self.opts.meta_fields else {}
                 if '_source' in hit:
-                    to_keyvalue_pairs(hit['_source'])
-                    tmp_file.write('%s\n' % json.dumps(out))
-                elif 'fields' in hit:
-                    to_keyvalue_pairs(hit['fields'])
-                    tmp_file.write('%s\n' % json.dumps(out))
+                    tmp_file.write('%s\n' % json.dumps(hit['_source']))
         tmp_file.close()
 
     def write_to_csv(self):
         if self.num_results > 0:
             self.num_results = sum(1 for line in open(self.tmp_file, 'r'))
             if self.num_results > 0:
-                self.csv_headers.sort()
-                output_file = open(self.opts.output_file, 'a')
-                csv_writer = csv.DictWriter(output_file, fieldnames=self.csv_headers, delimiter=self.opts.delimiter)
-                csv_writer.writeheader()
                 timer = 0
                 widgets = ['Write to csv ',
                            progressbar.Bar(left='[', marker='#', right=']'),
@@ -225,14 +189,10 @@ class Es2csv:
                 for line in open(self.tmp_file, 'r'):
                     timer += 1
                     bar.update(timer)
-                    line_as_dict = json.loads(line)
-                    line_dict_utf8 = {k: v.encode('utf8') if isinstance(v, unicode) else v for k, v in line_as_dict.items()}
-                    csv_writer.writerow(line_dict_utf8)
-                output_file.close()
                 bar.finish()
             else:
                 print('There is no docs with selected field(s): %s.' % ','.join(self.opts.fields))
-            os.remove(self.tmp_file)
+            self.tmp_file.close()
 
     def clean_scroll_ids(self):
         try:
