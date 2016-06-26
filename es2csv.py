@@ -17,6 +17,7 @@ import time
 import argparse
 import ujson as json
 import csv
+import gzip
 import elasticsearch
 import progressbar
 from functools import wraps
@@ -165,7 +166,7 @@ class Es2csv:
             bar.finish()
 
     def flush_to_file(self, hit_list):
-        with open(self.tmp_file, 'a') as tmp_file:
+        with gzip.open(self.tmp_file, 'a') as tmp_file:
             for hit in hit_list:
                 if '_source' in hit:
                     tmp_file.write('%s\n' % json.dumps(hit['_source']))
@@ -186,7 +187,7 @@ class Es2csv:
                            ]
                 bar = progressbar.ProgressBar(widgets=widgets, maxval=self.num_results).start()
 
-                for line in open(self.tmp_file, 'r'):
+                for line in gzip.open(self.tmp_file, 'r'):
                     timer += 1
                     bar.update(timer)
                 bar.finish()
